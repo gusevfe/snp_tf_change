@@ -16,23 +16,30 @@ $opts = Trollop::options do
 end
 
 def fimo(seq, database)
+  $log.info "FIMO for: #{seq}"
+
   tmp = Tempfile.new 'fimo'
   tmp.puts ">seq\n#{seq}"
   tmp.close
 
   r = []
 
-  IO.popen("fimo --norc --text --bgfile motif-file #{database} #{tmp.path} 2> /dev/null").each_line do |line|
-    next if line[0] == "#"
-    pattern, start, stop, pvalue = line.split.values_at(0, 2, 3, 6)
-    start = start.to_i
-    stop = stop.to_i
-    next if start > $opts[:window] or stop < $opts[:window]
+  IO.popen("fimo --norc --text --bgfile motif-file #{database} #{tmp.path} 2> /dev/null") do |io|
+    io.each_line do |line|
+      next if line[0] == "#"
+      pattern, start, stop, pvalue = line.split.values_at(0, 2, 3, 6)
+      start = start.to_i
+      stop = stop.to_i
+      next if start > $opts[:window] or stop < $opts[:window]
 
-    r << [pattern, pvalue]
+      r << [pattern, pvalue]
+    end
+
+    io.close
+    throw("Failed to run fimo!") if $?.to_i != 0
   end
 
-  r
+  return r
 end
 
 def tfscan(seq, database)
