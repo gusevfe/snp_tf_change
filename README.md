@@ -1,4 +1,4 @@
-A small script to check if 
+A small script to check SNP creates new or removes a transcription factor binging site.
 
 Prerequisites
 -------------
