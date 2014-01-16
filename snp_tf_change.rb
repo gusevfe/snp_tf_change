@@ -45,23 +45,27 @@ end
 def tfscan(seq, database)
   $log.info "TFSCAN for: #{seq}"
 
-
   tmp = Tempfile.new 'tfscan'
   tmp.puts seq
   tmp.close
 
   r = []
 
-  IO.popen("tfscan -sequence #{tmp.path} -menu V -mismatch 0 -filter 2> /dev/null").each_line do |line|
-    next if line[0] == "#"
-    s = line.split
-    next if s.size < 6
-    start = s[0].to_i
-    stop = s[1].to_i
-    pattern = s[4..-2] * " "
-    next if start > $opts[:window] or stop < $opts[:window]
+  IO.popen("tfscan -sequence #{tmp.path} -menu V -mismatch 0 -filter 2> /dev/null") do |io|
+    io.each_line do |line|
+      next if line[0] == "#"
+      s = line.split
+      next if s.size < 6
+      start = s[0].to_i
+      stop = s[1].to_i
+      pattern = s[4..-2] * " "
+      next if start > $opts[:window] or stop < $opts[:window]
 
-    r << [pattern, nil]
+      r << [pattern, nil]
+    end
+
+    io.close
+    throw("Failed to run fimo!") if $?.to_i != 0
   end
 
   r
