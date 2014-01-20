@@ -1,4 +1,5 @@
 require 'logger'
+require 'awesome_print'
 require 'tempfile'
 require 'bio'
 require 'trollop'
@@ -77,13 +78,20 @@ def diff_pvalue(a, b)
 end
 
 def run_predictions(algo, seq, alt, db)
-  ref = send(algo.to_s, seq, db)
-  variant = send(algo.to_s, alt, db)
+  ref = send(algo.to_s, seq.upcase, db)
+  variant = send(algo.to_s, alt.upcase, db)
 
   gain = diff_pvalue(variant, ref)
   loss = diff_pvalue(ref, variant)
 
   [gain, loss]
+end
+
+def seq_with_mutation(s, a, p)
+  front = s.slice(0, p)
+  back = s[(p+1)..-1]
+
+  front + "[" + s[p] + "/" + a + "]" + back
 end
 
 File.foreach($opts[:vcf]) do |line|
@@ -96,10 +104,12 @@ File.foreach($opts[:vcf]) do |line|
   fa = %x{samtools faidx #{$opts[:fasta]} #{chr}:#{pos - $opts[:window]}-#{pos + $opts[:window]}}
   fa = Bio::FastaFormat.new(fa).seq
   fa = Bio::Sequence::NA.new(fa)
-  rev = fa.reverse_complement.seq
-  fa = fa.seq
+  rev = fa.reverse_complement.seq.upcase
+  fa = fa.seq.upcase
   alt.each do |a|
     throw("Not a SNP!") if a.length != 1
+    $log.info "Predictions for SNP in #{chr}:#{pos}"
+    $log.info "Sequence is: #{seq_with_mutation(fa, a, $opts[:window]).upcase}"
 
     a_forward = fa.dup
     a_forward[$opts[:window]] = a
@@ -109,6 +119,7 @@ File.foreach($opts[:vcf]) do |line|
     loss.each { |u| puts [chr, pos, name, ref, a, "+", "loss", u.first] * "\t" }
 
     a_revcomp = Bio::Sequence::NA.new(a_forward).reverse_complement.seq
+    $log.info "Sequence is: #{seq_with_mutation(rev, a_revcomp[$opts[:window]], $opts[:window]).upcase}"
     gain, loss = run_predictions($opts[:method], rev, a_revcomp, $opts[:db])
 
     gain.each { |u| puts [chr, pos, name, ref, a, "-", "gain", u].flatten * "\t" }
