@@ -7,13 +7,16 @@ require 'trollop'
 $log = Logger.new STDERR
 
 $opts = Trollop::options do
-  opt :vcf, "VCF file to process", :type => :string, :required => true
-  opt :fasta, "Reference fasta file", :type => :string, :required => true
+  opt :vcf, "VCF file to process", :type => :string, :required => false, :default => nil
+  opt :fasta, "Reference fasta file", :type => :string, :required => false, :default => nil
   opt :method, "Method (fimo or tfscan)", :type => :string, :required => false, :default => "tfscan"
   opt :db, "DB to use (fimo only)", :type => :string, :required => false, :default => "data/HOCOMOCOv9_AD_MEME.txt"
   opt :window, "Window for transcription factor prediction", 
                :type => :int, 
                :required => false, :default => 15
+
+  opt :reference, "File with reference sequence", :type => :string, :required => false, :default => nil
+  opt :mutant, "File with mutant sequence", :type => :string, :required => false, :default => nil
 end
 
 def fimo(seq, database)
@@ -94,35 +97,53 @@ def seq_with_mutation(s, a, p)
   front + "[" + s[p] + "/" + a + "]" + back
 end
 
-File.foreach($opts[:vcf]) do |line|
-  next if line[0] == "#"
-  chr, pos, name, ref, alt = line.split("\t").values_at(0, 1, 2, 3, 4)
-  throw("Not a SNP!") if ref.length != 1
-  $log.info "SNP = #{name}"
-  pos = pos.to_i
-  alt = alt.split ","
-  fa = %x{samtools faidx #{$opts[:fasta]} #{chr}:#{pos - $opts[:window]}-#{pos + $opts[:window]}}
-  fa = Bio::FastaFormat.new(fa).seq
-  fa = Bio::Sequence::NA.new(fa)
-  rev = fa.reverse_complement.seq.upcase
-  fa = fa.seq.upcase
-  alt.each do |a|
-    throw("Not a SNP!") if a.length != 1
-    $log.info "Predictions for SNP in #{chr}:#{pos}"
-    $log.info "Sequence is: #{seq_with_mutation(fa, a, $opts[:window]).upcase}"
+if $opts[:vcf] != nil
+  throw("Need a reference file!") if $opts[:fasta] == nil
+  File.foreach($opts[:vcf]) do |line|
+    next if line[0] == "#"
+    chr, pos, name, ref, alt = line.split("\t").values_at(0, 1, 2, 3, 4)
+    throw("Not a SNP!") if ref.length != 1
+    $log.info "SNP = #{name}"
+    pos = pos.to_i
+    alt = alt.split ","
+    fa = %x{samtools faidx #{$opts[:fasta]} #{chr}:#{pos - $opts[:window]}-#{pos + $opts[:window]}}
+    fa = Bio::FastaFormat.new(fa).seq
+    fa = Bio::Sequence::NA.new(fa)
+    rev = fa.reverse_complement.seq.upcase
+    fa = fa.seq.upcase
+    alt.each do |a|
+      throw("Not a SNP!") if a.length != 1
+      $log.info "Predictions for SNP in #{chr}:#{pos}"
+      $log.info "Sequence is: #{seq_with_mutation(fa, a, $opts[:window]).upcase}"
 
-    a_forward = fa.dup
-    a_forward[$opts[:window]] = a
-    gain, loss = run_predictions($opts[:method], fa, a_forward, $opts[:db])
+      a_forward = fa.dup
+      a_forward[$opts[:window]] = a
+      gain, loss = run_predictions($opts[:method], fa, a_forward, $opts[:db])
 
-    gain.each { |u| puts [chr, pos, name, ref, a, "+", "gain", u.first] * "\t" }
-    loss.each { |u| puts [chr, pos, name, ref, a, "+", "loss", u.first] * "\t" }
+      gain.each { |u| puts [chr, pos, name, ref, a, "+", "gain", u.first] * "\t" }
+      loss.each { |u| puts [chr, pos, name, ref, a, "+", "loss", u.first] * "\t" }
 
-    a_revcomp = Bio::Sequence::NA.new(a_forward).reverse_complement.seq
-    $log.info "Sequence is: #{seq_with_mutation(rev, a_revcomp[$opts[:window]], $opts[:window]).upcase}"
-    gain, loss = run_predictions($opts[:method], rev, a_revcomp, $opts[:db])
+      a_revcomp = Bio::Sequence::NA.new(a_forward).reverse_complement.seq
+      $log.info "Sequence is: #{seq_with_mutation(rev, a_revcomp[$opts[:window]], $opts[:window]).upcase}"
+      gain, loss = run_predictions($opts[:method], rev, a_revcomp, $opts[:db])
 
-    gain.each { |u| puts [chr, pos, name, ref, a, "-", "gain", u].flatten * "\t" }
-    loss.each { |u| puts [chr, pos, name, ref, a, "-", "loss", u].flatten * "\t" }
+      gain.each { |u| puts [chr, pos, name, ref, a, "-", "gain", u].flatten * "\t" }
+      loss.each { |u| puts [chr, pos, name, ref, a, "-", "loss", u].flatten * "\t" }
+    end
   end
+elsif $opts[:reference] != nil
+  gain, loss = run_predictions($opts[:method], $opts[:reference], $opts[:mutant], $opts[:db])
+
+  gain.each { |u| puts ["", "", "", "", "", "", "+", "gain", u.first] * "\t" }
+  loss.each { |u| puts ["", "", "", "", "", "", "+", "loss", u.first] * "\t" }
+
+  reference_revcomp = Bio::Sequence::NA.new($opts[:reference]).reverse_complement.seq
+  mutant_revcomp = Bio::Sequence::NA.new($opts[:mutant]).reverse_complement.seq
+
+  gain, loss = run_predictions($opts[:method], reference_revcomp, mutant_revcomp, $opts[:db])
+
+  gain.each { |u| puts ["", "", "", "", "", "", "-", "gain", u].flatten * "\t" }
+  loss.each { |u| puts ["", "", "", "", "", "", "-", "loss", u].flatten * "\t" }
+else
+  throw "Need either VCF with reference genome, or sequence and mutant inself!"
 end
